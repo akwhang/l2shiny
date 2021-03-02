@@ -1,0 +1,105 @@
+---
+title: "SVC Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    source_code: embed
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(plotly)
+library(flexdashboard)
+library(knitr)
+library(DT)
+source("Shiny L2 Data.R")
+startSVC <- svc_raw
+startCase <- case_raw
+```
+
+Column {.sidebar}
+===========================================================
+```{r}
+selectInput(inputId = "segment", label = "Segment Team", 
+            choices = c('Enterprise','NetX','Mid Market','Small','Five Star'),
+            selected = c('Enterprise','NetX','Mid Market','Small','Five Star'),
+            multiple = TRUE )
+dateRangeInput(inputId = "date", label = "Date Range",
+               start = '2020-08-01', 
+               min = '2020-08-01',
+               autoclose = FALSE)
+
+updateSVC <- reactive(
+  startSVC %>% 
+    filter(Team %in% input$segment,
+           between(date, input$date[1], input$date[2])) %>% 
+    group_by(date) %>%
+    mutate(svc_total = n()) %>% 
+    select(date, svc_total) %>% 
+    distinct() %>% 
+    arrange(date)
+)
+updateCase <- reactive(
+  startCase %>% 
+    filter(Team %in% input$segment,
+           between(date, input$date[1], input$date[2])) %>%
+    group_by(date) %>%
+    mutate(case_total = n()) %>% 
+    select(date, case_total) %>% 
+    distinct() %>% 
+    arrange(date)
+)
+ratioData <- reactive(
+  updateCase() %>% 
+  left_join(updateSVC()) %>%
+  mutate(ratio = round(svc_total/case_total*100, digits=3)) %>%
+  rename("Total Cases" = "case_total",
+         "Total SVCs" = "svc_total") %>%
+  arrange(date)
+  )
+```
+
+SVC Ratio
+===========================================================
+
+### SVC to Case Ratio
+-----------------------------------------------------------
+```{r}
+renderPlotly({
+  p <- ggplot(ratioData(), aes(date, ratio)) + 
+  geom_bar(stat="identity",aes(fill=ratio)) +
+  scale_x_date(date_labels = "%m-%Y",date_breaks = "1 month", name = "Month") +
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5, hjust=1),legend.position = "none")
+  
+  ggplotly(p)
+})
+
+```
+```{r}
+renderTable(
+  ratioData() %>%
+    mutate(year = as.character(year(date)),
+           month = month(date, label = TRUE)) %>%
+    ungroup %>%
+    select(year, month, 'Total Cases', 'Total SVCs', ratio),
+  wdith = '100%',
+  align = 'c'
+)
+```
+Average Values
+```{r}
+renderTable(
+  ratioData() %>%
+    ungroup%>%
+    summarise(across(everything(),mean)) %>%
+    select('Total Cases', 'Total SVCs', ratio)
+)
+```
+
+Resolution Breakdown
+===========================================================
+### Top 10 SVCs
+-----------------------------------------------------------
+
